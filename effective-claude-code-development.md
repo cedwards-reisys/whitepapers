@@ -6,6 +6,46 @@
 
 ---
 
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [Prerequisites](#prerequisites)
+- [Introduction](#introduction)
+  - [The Problem with Naive AI-Assisted Development](#the-problem-with-naive-ai-assisted-development)
+  - [The Metadata-First Approach](#the-metadata-first-approach)
+  - [What This Whitepaper Covers](#what-this-whitepaper-covers)
+- [Configuring Claude Code for Production Use](#configuring-claude-code-for-production-use)
+  - [The CLAUDE.md Hierarchy](#the-claudemd-hierarchy)
+  - [Settings and Permissions](#settings-and-permissions)
+  - [Memory Files for Evolving Context](#memory-files-for-evolving-context)
+- [The Metadata Generation Workflow](#the-metadata-generation-workflow)
+  - [Phase 1: Architecture Discovery with Plan Mode](#phase-1-architecture-discovery-with-plan-mode)
+  - [Phase 2: Interface Contract Generation](#phase-2-interface-contract-generation)
+  - [Phase 3: Implementation Checklist Generation](#phase-3-implementation-checklist-generation)
+- [Implementation Patterns](#implementation-patterns)
+  - [Prompting with Context References](#prompting-with-context-references)
+  - [Subagent Delegation for Parallel Work](#subagent-delegation-for-parallel-work)
+  - [Iterative Refinement with Test Feedback](#iterative-refinement-with-test-feedback)
+  - [Working with Existing Codebases](#working-with-existing-codebases)
+- [Web Application Development](#web-application-development)
+  - [Backend API Development](#backend-api-development)
+  - [Frontend Development](#frontend-development)
+  - [Full-Stack Coordination](#full-stack-coordination)
+- [CI/CD Integration](#cicd-integration)
+  - [GitHub Actions: Claude Code as Automated Reviewer](#github-actions-claude-code-as-automated-reviewer)
+  - [Headless Mode for Pipeline Tasks](#headless-mode-for-pipeline-tasks)
+  - [Cost and Performance Management](#cost-and-performance-management)
+- [Infrastructure as Code](#infrastructure-as-code)
+  - [Terraform with Claude Code](#terraform-with-claude-code)
+  - [AWS CDK with Claude Code](#aws-cdk-with-claude-code)
+- [Playbooks](#playbooks) (9 end-to-end walkthroughs, collapsible)
+- [Hooks and Automation Recipes](#hooks-and-automation-recipes)
+- [Best Practices and Anti-Patterns](#best-practices-and-anti-patterns)
+- [Appendix A: Quick Reference Card](#appendix-a-quick-reference-card)
+- [Appendix B: CLAUDE.md Templates](#appendix-b-claudemd-templates)
+
+---
+
 ## Executive Summary
 
 Claude Code is a CLI-based AI development tool that operates directly in your terminal with full access to your project context—files, git history, environment, and toolchain. Unlike chat-based AI assistants that require manual copy-paste of code snippets, Claude Code reads your codebase, executes commands, edits files, and integrates with your existing development workflow.
@@ -22,6 +62,15 @@ We cover the full development lifecycle: planning and discovery, implementation,
 - Web application development—both backend APIs and frontend SPAs—benefits from component-level metadata generation and interface-first design
 - Infrastructure as Code benefits enormously from metadata-driven prompting because of the declarative, well-documented nature of Terraform and CloudFormation
 
+## Prerequisites
+
+This guide assumes you have:
+
+- **Claude Code installed** and authenticated (`npm install -g @anthropic-ai/claude-code`)
+- **Basic familiarity** with running Claude Code interactively (`claude` in your terminal)
+- **A software project** you want to apply these techniques to—the examples use Go, TypeScript, and Python, but the methodology is language-agnostic
+
+No prior experience with `CLAUDE.md`, plan mode, or headless mode is required—those are covered in detail below.
 
 ## Introduction
 
@@ -47,14 +96,13 @@ These artifacts are both **human-readable documentation** and **machine-consumab
 
 ### What This Whitepaper Covers
 
-- **Section 3**: Configuring Claude Code for production use—`CLAUDE.md`, settings, permissions, and memory
-- **Section 4**: The metadata generation workflow—how to create high-quality context before writing code
-- **Section 5**: Implementation patterns—effective prompting, subagent delegation, and iterative refinement
-- **Section 6**: Web application development—backend APIs, frontend SPAs, and full-stack patterns
-- **Section 7**: CI/CD integration—GitHub Actions, automated review, headless pipelines
-- **Section 8**: Infrastructure as Code—Terraform and AWS CDK with Claude Code
-- **Section 9**: Complete playbooks—end-to-end walkthroughs for common scenarios
-
+- **[Configuring Claude Code for Production Use](#configuring-claude-code-for-production-use)**—`CLAUDE.md`, settings, permissions, and memory
+- **[The Metadata Generation Workflow](#the-metadata-generation-workflow)**—how to create high-quality context before writing code
+- **[Implementation Patterns](#implementation-patterns)**—effective prompting, subagent delegation, and iterative refinement
+- **[Web Application Development](#web-application-development)**—backend APIs, frontend SPAs, and full-stack patterns
+- **[CI/CD Integration](#cicd-integration)**—GitHub Actions, automated review, headless pipelines
+- **[Infrastructure as Code](#infrastructure-as-code)**—Terraform and AWS CDK with Claude Code
+- **[Playbooks](#playbooks)**—end-to-end walkthroughs for common scenarios
 
 ## Configuring Claude Code for Production Use
 
@@ -64,7 +112,7 @@ Before writing a single line of code, proper configuration determines the qualit
 
 Claude Code loads instructions from multiple `CLAUDE.md` files in a specific priority order:
 
-```
+```text
 ~/.claude/CLAUDE.md              # User-wide defaults (your personal preferences)
 ./CLAUDE.md                      # Project root (team conventions, shared)
 ./.claude/CLAUDE.md              # Alternative project location
@@ -73,7 +121,8 @@ Claude Code loads instructions from multiple `CLAUDE.md` files in a specific pri
 ./.claude/rules/*.md             # Modular rule files
 ```
 
-**The project-root `CLAUDE.md` is the single highest-impact configuration you can create.** It is loaded in full at the start of every session and directly shapes every response Claude Code generates.
+> [!IMPORTANT]
+> The project-root `CLAUDE.md` is the single highest-impact configuration you can create. It is loaded in full at the start of every session and directly shapes every response Claude Code generates.
 
 #### Effective CLAUDE.md Structure
 
@@ -118,16 +167,16 @@ A production `CLAUDE.md` should be under 200 lines and cover these categories:
 ## Dependencies
 - Chi v5 for routing
 - sqlc for type-safe SQL
-- golang-migrate for schema migrations
+- goose for schema migrations
 - testcontainers-go for integration tests
 ```
 
-#### What NOT to Put in CLAUDE.md
-
-- Generic advice ("write clean code")—be specific or omit it
-- Lengthy tutorials or explanations—link to docs instead
-- Frequently changing information—use memory files for volatile data
-- Secrets or credentials—use environment variables
+> [!WARNING]
+> **What NOT to put in CLAUDE.md:**
+> - Generic advice ("write clean code")—be specific or omit it
+> - Lengthy tutorials or explanations—link to docs instead
+> - Frequently changing information—use memory files for volatile data
+> - Secrets or credentials—use environment variables
 
 ### Settings and Permissions
 
@@ -184,10 +233,10 @@ Claude Code's auto-memory (`~/.claude/projects/<project>/memory/`) captures lear
 
 Memory files bridge sessions. When you discover that a particular test requires a specific environment variable or that a certain API endpoint has an undocumented constraint, record it in memory so future sessions start with that knowledge.
 
-
 ## The Metadata Generation Workflow
 
-This section describes the core methodology: generating structured metadata *before* implementation. This is where the highest ROI exists in AI-assisted development.
+> [!TIP]
+> This section describes the core methodology: generating structured metadata *before* implementation. This is where the highest ROI exists in AI-assisted development.
 
 ### Phase 1: Architecture Discovery with Plan Mode
 
@@ -204,7 +253,7 @@ claude --permission-mode plan
 
 Then prompt for structured analysis:
 
-```
+```text
 Analyze this codebase and produce the following artifacts:
 
 1. DEPENDENCY MAP: A list of all services/packages and their
@@ -224,11 +273,26 @@ Analyze this codebase and produce the following artifacts:
 
 This produces structured output that becomes your implementation roadmap. The convention report is particularly valuable—it tells Claude Code (and you) exactly how to implement new code that matches existing patterns.
 
+For example, a dependency map generated by Claude Code might look like this (GitHub renders Mermaid natively):
+
+```mermaid
+graph LR
+    A[HTTP Handler] --> B[Order Service]
+    B --> C[Order Repository]
+    B --> D[Notification Service]
+    C --> E[(PostgreSQL)]
+    D --> F[Email Provider]
+    A --> G[Auth Middleware]
+    G --> H[JWT Validator]
+```
+
+Store these artifacts in your repository (e.g., `docs/architecture/`) so Claude Code can reference them in future sessions.
+
 #### Generating Architecture Decision Records
 
 ADRs capture the *why* behind technical choices. They're invaluable context for Claude Code because they explain constraints that aren't visible in the code itself.
 
-```
+```text
 Based on your analysis, generate an ADR for the following decision:
 
 Title: Use cursor-based pagination for order history
@@ -277,7 +341,7 @@ Before implementing a feature, define its interfaces. This is metadata that cons
 
 #### OpenAPI Spec Generation
 
-```
+```text
 Generate an OpenAPI 3.1 specification for the order history endpoint
 with these requirements:
 
@@ -294,7 +358,7 @@ envelope structure used by other endpoints.
 
 #### Database Schema Generation
 
-```
+```text
 Generate a SQL migration for the order history feature:
 
 - New index on orders table for (tenant_id, status, created_at DESC)
@@ -305,7 +369,7 @@ Generate a SQL migration for the order history feature:
 
 #### Interface Definition
 
-```
+```text
 Define the Go interfaces for the order history feature following
 the existing clean architecture pattern:
 
@@ -322,7 +386,7 @@ contract, parameters, and error conditions.
 
 After discovery and interface definition, generate a detailed implementation checklist. This becomes the execution plan.
 
-```
+```text
 Based on the ADR, OpenAPI spec, migration, and interfaces we've
 defined, generate a step-by-step implementation checklist. For each
 step, include:
@@ -383,7 +447,6 @@ Example output:
 
 This checklist is the bridge between planning and implementation. Each step is specific enough that Claude Code can execute it independently, and each has a verification command so you can confirm correctness before moving to the next step.
 
-
 ## Implementation Patterns
 
 With metadata in place, implementation becomes a series of constrained, verifiable steps rather than open-ended code generation.
@@ -392,7 +455,7 @@ With metadata in place, implementation becomes a series of constrained, verifiab
 
 The most effective implementation prompts reference the metadata you've already created:
 
-```
+```text
 Implement step 4 from the implementation checklist: OrderRepository.ListByTenant()
 
 Context:
@@ -414,7 +477,7 @@ This prompt is effective because:
 
 Claude Code's subagent system enables parallel task execution. Use this for independent implementation steps:
 
-```
+```text
 I need to implement steps 4, 5, and 6 from the checklist in parallel.
 Each is independent—the service can use the repository interface,
 and the handler can use the service interface, even before the
@@ -434,7 +497,7 @@ Claude Code will spawn subagents that work in isolated contexts, producing imple
 
 When tests fail, provide the failure output as context for the fix:
 
-```
+```text
 The integration test is failing with this output:
 
 --- FAIL: TestOrderHistoryIntegration/pagination_returns_correct_cursor
@@ -452,7 +515,7 @@ This is more effective than "fix the test" because it narrows the search space a
 
 For brownfield projects, the discovery phase is critical. Use the Explore subagent for codebase analysis:
 
-```
+```text
 Before making any changes, I need you to understand how authentication
 works in this codebase. Search for:
 
@@ -465,7 +528,6 @@ Produce a summary with file paths and line numbers.
 ```
 
 This produces a map of the existing auth system that Claude Code uses as context for any auth-related implementation, preventing it from reimplementing patterns that already exist.
-
 
 ## Web Application Development
 
@@ -481,7 +543,7 @@ Before generating any backend code, produce these artifacts:
 
 A route map is a structured inventory of every endpoint, its HTTP method, authentication requirements, and request/response shapes. This becomes the single source of truth for both implementation and frontend integration.
 
-```
+```text
 Analyze the existing routes in this codebase and produce a route map
 in this format:
 
@@ -497,7 +559,7 @@ as "planned" in the Status column.
 
 **2. Data Model Registry**
 
-```
+```text
 Generate a data model registry for this project. For each model:
 
 1. Name and database table
@@ -509,13 +571,13 @@ Generate a data model registry for this project. For each model:
 7. Any computed/virtual fields
 
 Format as structured markdown. Include both the database
-representation and the API representation (they often differ---
+representation and the API representation (they often differ—
 internal fields like password_hash shouldn't appear in API responses).
 ```
 
 **3. Middleware Chain Documentation**
 
-```
+```text
 Document the middleware chain for this application:
 
 1. Global middleware (applied to all routes)
@@ -538,7 +600,7 @@ request ID, logging) vs. what the handler must do itself.
 
 Rather than implementing layer-by-layer across the entire feature, implement **vertical slices**—one complete endpoint at a time, from route to database and back:
 
-```
+```text
 Implement the POST /api/v1/products endpoint as a complete vertical slice.
 
 Route map entry:
@@ -605,7 +667,7 @@ For Node.js backends, the metadata-first approach adapts to the ecosystem's conv
 
 Zod schemas serve as both runtime validation and compile-time types, making them ideal metadata artifacts for Claude Code:
 
-```
+```text
 Generate Zod schemas for the product resource:
 
 1. CreateProductSchema - request body validation
@@ -626,7 +688,7 @@ using z.infer<>. These schemas will be used by:
 
 FastAPI's Pydantic models serve the same dual-purpose metadata role:
 
-```
+```text
 Generate the FastAPI application structure for an order management API:
 
 1. app/models/order.py - SQLAlchemy models (Order, OrderItem)
@@ -659,7 +721,7 @@ Frontend development with Claude Code requires a different metadata strategy. In
 
 **1. Component Tree**
 
-```
+```text
 Analyze this React application and produce a component tree:
 
 For each component:
@@ -688,7 +750,7 @@ App
 
 **2. State Management Map**
 
-```
+```text
 Document all state management in this application:
 
 1. GLOBAL STATE (Zustand/Redux/Context):
@@ -719,7 +781,7 @@ conflicting data flows, or unnecessary prop drilling.
 
 **3. Design System Inventory**
 
-```
+```text
 Catalog the design system / component library used in this project:
 
 1. UI LIBRARY: What base components exist?
@@ -747,7 +809,7 @@ not create new primitives.
 
 #### Frontend Implementation Pattern: Component-First Development
 
-```
+```text
 Implement the Order List page. Here is the metadata context:
 
 Component tree position: Pages > Orders > OrderListPage
@@ -824,7 +886,7 @@ That page uses the same DataTable + filter + pagination pattern.
 
 For Next.js projects, the metadata needs to account for the server/client boundary:
 
-```
+```text
 Analyze this Next.js App Router application and produce a
 server/client component map:
 
@@ -849,7 +911,7 @@ database directly MUST be a server component.
 
 **Implementation prompt for Next.js:**
 
-```
+```text
 Implement the /orders page using Next.js App Router patterns.
 
 Server/client boundary:
@@ -904,7 +966,7 @@ The highest-value metadata artifact in full-stack development is the **shared co
 
 #### Shared Type Generation
 
-```
+```text
 This monorepo has a shared types package at packages/shared-types/.
 The backend (packages/api/) and frontend (packages/web/) both
 import from it.
@@ -930,7 +992,7 @@ build time across both packages.
 
 #### API Client Generation
 
-```
+```text
 Generate a type-safe API client for the frontend based on the
 backend's OpenAPI spec at packages/api/openapi.yaml.
 
@@ -952,7 +1014,7 @@ gets a compile error.
 
 The recommended workflow for full-stack features:
 
-```
+```text
 Implement the "order filtering" feature across the full stack.
 
 Phase 1 - Contract (generate metadata):
@@ -974,7 +1036,6 @@ Phase 3 - Frontend (use contract):
 Execute phases sequentially. The shared contract from Phase 1
 constrains both Phase 2 and Phase 3, preventing drift.
 ```
-
 
 ## CI/CD Integration
 
@@ -1143,6 +1204,9 @@ claude -p "review" --model claude-sonnet-4-6    # Faster, cheaper
 claude -p "architect" --model claude-opus-4-6   # More capable
 ```
 
+> [!NOTE]
+> Cost estimates below are approximate and vary with codebase size, prompt complexity, and model pricing changes. Use `--max-budget-usd` to enforce hard limits.
+
 **Cost guidelines for CI tasks:**
 
 | Task | Recommended Model | Max Turns | Typical Cost |
@@ -1152,7 +1216,6 @@ claude -p "architect" --model claude-opus-4-6   # More capable
 | Changelog generation | Haiku | 3 | $0.01–0.05 |
 | Architecture review | Opus | 15 | $0.50–2.00 |
 | Security audit | Opus | 20 | $1.00–5.00 |
-
 
 ## Infrastructure as Code
 
@@ -1208,7 +1271,7 @@ The metadata-first approach is particularly effective for infrastructure. Start 
 
 Then prompt Claude Code with this context:
 
-```
+```text
 Generate Terraform configuration for the order-service infrastructure
 described in docs/infrastructure-requirements.md.
 
@@ -1227,7 +1290,7 @@ Generate for the staging environment in terraform/environments/staging/
 
 Claude Code excels at generating reusable Terraform modules with proper variable definitions, outputs, and documentation:
 
-```
+```text
 Create a Terraform module at terraform/modules/rds-postgres/ for
 provisioning RDS PostgreSQL instances.
 
@@ -1267,7 +1330,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.7.0
+          terraform_version: "~> 1.7"  # Pin to your project's version
 
       - name: Terraform Init
         run: terraform -chdir=terraform/environments/${{ matrix.environment }} init -backend=false
@@ -1301,7 +1364,7 @@ jobs:
 
 For teams using AWS CDK, the same metadata-first approach applies:
 
-```
+```text
 Generate a CDK stack for the order-service infrastructure.
 
 Use these conventions from the existing codebase:
@@ -1316,12 +1379,12 @@ Use these conventions from the existing codebase:
 Reference the existing user-service stack as the template.
 ```
 
-
 ## Playbooks
 
 The following playbooks are end-to-end walkthroughs for common scenarios. Each can be executed as a series of Claude Code sessions.
 
-### Playbook 1: Greenfield Microservice
+<details>
+<summary><h3>Playbook 1: Greenfield Microservice</h3></summary>
 
 **Scenario**: Create a new Go microservice from scratch with CI/CD and infrastructure.
 
@@ -1335,7 +1398,7 @@ git init
 claude
 ```
 
-```
+```text
 Initialize a Go microservice project with the following structure:
 
 cmd/server/main.go          - Entry point, config loading, server startup
@@ -1364,7 +1427,7 @@ Generate all files with proper implementations, not just stubs.
 
 After the initial scaffold, refine the CLAUDE.md:
 
-```
+```text
 Analyze the project you just created and generate a comprehensive
 CLAUDE.md that captures:
 - All build/test/lint commands
@@ -1376,7 +1439,7 @@ CLAUDE.md that captures:
 
 #### Step 3: Define the Domain (10 min)
 
-```
+```text
 I need to add order management to this service. Here are the
 requirements:
 
@@ -1405,7 +1468,7 @@ Only generate the metadata artifacts (migrations, queries, spec, interfaces).
 
 #### Step 4: Implement Layer by Layer (20 min)
 
-```
+```text
 Now implement the order service following the implementation order:
 
 1. Run `goose up` to apply migrations
@@ -1423,7 +1486,7 @@ tests after each layer.
 
 #### Step 5: CI/CD Pipeline (5 min)
 
-```
+```text
 Update .github/workflows/ci.yml to include:
 - Go build and test with race detector
 - golangci-lint
@@ -1437,7 +1500,7 @@ PR review using the claude-code-action.
 
 #### Step 6: Infrastructure (5 min)
 
-```
+```text
 Generate Terraform configuration in terraform/ for deploying this
 service to AWS:
 
@@ -1451,9 +1514,10 @@ Use a terraform/environments/staging/ structure with a shared
 terraform/modules/ directory.
 ```
 
----
+</details>
 
-### Playbook 2: Adding CI/CD to an Existing Project
+<details>
+<summary><h3>Playbook 2: Adding CI/CD to an Existing Project</h3></summary>
 
 **Scenario**: A Node.js project has no CI/CD. Add a complete pipeline.
 
@@ -1463,7 +1527,7 @@ terraform/modules/ directory.
 claude --permission-mode plan
 ```
 
-```
+```text
 Analyze this project and produce a CI/CD readiness report:
 
 1. What package manager is used? (npm, yarn, pnpm, bun)
@@ -1480,7 +1544,7 @@ Output as structured markdown.
 
 #### Step 2: Generate Pipeline
 
-```
+```text
 Based on the CI/CD readiness report, generate:
 
 1. .github/workflows/ci.yml:
@@ -1509,7 +1573,7 @@ Test the CI workflow locally using `act` if available.
 
 #### Step 3: Add Pre-commit Hooks
 
-```
+```text
 Set up pre-commit hooks using husky and lint-staged:
 - Run linter on staged .ts/.tsx files
 - Run type-check
@@ -1521,15 +1585,16 @@ In .claude/settings.json, add a PostToolUse hook that runs
 prettier on any file Claude modifies.
 ```
 
----
+</details>
 
-### Playbook 3: Infrastructure Module Development
+<details>
+<summary><h3>Playbook 3: Infrastructure Module Development</h3></summary>
 
 **Scenario**: Build a reusable Terraform module for a common infrastructure pattern.
 
 #### Step 1: Define the Module Contract
 
-```
+```text
 I need a Terraform module for deploying a containerized service
 on ECS Fargate. Before writing any Terraform, define:
 
@@ -1551,7 +1616,7 @@ Output as a markdown specification document.
 
 #### Step 2: Implement the Module
 
-```
+```text
 Implement the ECS Fargate module based on the specification.
 
 Structure:
@@ -1573,7 +1638,7 @@ arguments against the Terraform registry.
 
 #### Step 3: Test the Module
 
-```
+```text
 Create a test configuration for the ECS Fargate module:
 
 1. terraform/tests/ecs-fargate-service/
@@ -1590,9 +1655,10 @@ Create a test configuration for the ECS Fargate module:
    manually verified after deployment.
 ```
 
----
+</details>
 
-### Playbook 4: Bug Triage and Fix
+<details>
+<summary><h3>Playbook 4: Bug Triage and Fix</h3></summary>
 
 **Scenario**: A production bug report comes in. Use Claude Code to triage and fix.
 
@@ -1602,7 +1668,7 @@ Create a test configuration for the ECS Fargate module:
 claude --from-pr 456  # or start fresh with the bug context
 ```
 
-```
+```text
 Bug report: "Orders with more than 50 items fail to save.
 The API returns 500. This started after PR #432 was merged."
 
@@ -1620,7 +1686,7 @@ Produce a root cause analysis before suggesting any fix.
 
 #### Step 2: Fix with Verification
 
-```
+```text
 Based on the root cause analysis (the sqlc batch insert has a
 PostgreSQL parameter limit of 65535, and 50 items * 6 columns
 per item * multiple queries exceeds this):
@@ -1635,7 +1701,7 @@ Run all tests after the fix.
 
 #### Step 3: Create the PR
 
-```
+```text
 Create a PR for this fix:
 - Branch name: fix/large-order-batch-insert
 - Title: concise description of the fix
@@ -1643,15 +1709,16 @@ Create a PR for this fix:
 - Reference the original bug report/issue
 ```
 
----
+</details>
 
-### Playbook 5: Automated Security Audit
+<details>
+<summary><h3>Playbook 5: Automated Security Audit</h3></summary>
 
 **Scenario**: Quarterly security review of the codebase.
 
 #### Step 1: Automated Scan
 
-```
+```text
 Perform a security audit of this codebase. Check for:
 
 1. SQL INJECTION: Any raw SQL construction (not parameterized)
@@ -1677,7 +1744,7 @@ Output as a structured security report in markdown.
 
 #### Step 2: Generate Fixes
 
-```
+```text
 For each Critical and High severity finding in the security
 report, generate a fix. Group related fixes into logical commits.
 
@@ -1685,15 +1752,16 @@ After implementing fixes, run the full test suite to verify
 nothing is broken.
 ```
 
----
+</details>
 
-### Playbook 6: Multi-Environment Infrastructure Promotion
+<details>
+<summary><h3>Playbook 6: Multi-Environment Infrastructure Promotion</h3></summary>
 
 **Scenario**: Promote infrastructure changes through dev -> staging -> production.
 
 #### Step 1: Generate Environment-Aware Configuration
 
-```
+```text
 Our Terraform uses a environments/<env>/main.tf structure where
 each environment references shared modules with different variables.
 
@@ -1719,7 +1787,7 @@ passed to the shared module.
 
 #### Step 2: Validate Promotion Path
 
-```
+```text
 Generate a validation script that:
 1. Runs terraform plan for dev, staging, and production
 2. Compares the resource counts and types across environments
@@ -1730,9 +1798,10 @@ Generate a validation script that:
 Save as scripts/validate-promotion.sh
 ```
 
----
+</details>
 
-### Playbook 7: Full-Stack Web Application (React + Node.js API)
+<details>
+<summary><h3>Playbook 7: Full-Stack Web Application (React + Node.js API)</h3></summary>
 
 **Scenario**: Build a complete web application with a backend API and React frontend in a monorepo.
 
@@ -1746,7 +1815,7 @@ git init
 claude
 ```
 
-```
+```text
 Initialize a TypeScript monorepo with this structure:
 
 packages/
@@ -1797,7 +1866,7 @@ Generate complete, working files—not stubs. Include:
 
 #### Step 2: Define the Domain Model (10 min)
 
-```
+```text
 This is a project management SaaS. Define the data model:
 
 Entities:
@@ -1820,7 +1889,7 @@ shared types.
 
 #### Step 3: Backend API Implementation (25 min)
 
-```
+```text
 Implement the complete REST API for the project management app.
 
 Use the shared types from packages/shared-types/ for all
@@ -1859,7 +1928,7 @@ Run tests after each resource is complete.
 
 #### Step 4: Frontend Application (30 min)
 
-```
+```text
 Implement the frontend for the project management app.
 
 Generate these pages and components:
@@ -1904,7 +1973,7 @@ page works before moving to the next.
 
 #### Step 5: Polish and Integration Testing (15 min)
 
-```
+```text
 Now tie everything together:
 
 1. Add loading states (skeleton components) for all data-fetching pages
@@ -1919,9 +1988,10 @@ Now tie everything together:
    docker-compose up -> pnpm dev -> app accessible at localhost:5173
 ```
 
----
+</details>
 
-### Playbook 8: Backend API with Authentication and Authorization
+<details>
+<summary><h3>Playbook 8: Backend API with Authentication and Authorization</h3></summary>
 
 **Scenario**: Build a production-grade backend API with comprehensive auth, RBAC, and multi-tenancy.
 
@@ -1931,7 +2001,7 @@ Now tie everything together:
 claude --permission-mode plan
 ```
 
-```
+```text
 I need to design the authentication and authorization system for
 a multi-tenant B2B SaaS API. Produce an ADR covering:
 
@@ -1956,7 +2026,7 @@ Produce the ADR and a data model for the auth tables
 
 #### Step 2: Auth Infrastructure (15 min)
 
-```
+```text
 Implement the authentication infrastructure based on the ADR.
 
 Database:
@@ -1992,7 +2062,7 @@ protected route -> refresh -> logout -> verify rejected.
 
 #### Step 3: Resource Authorization (10 min)
 
-```
+```text
 Implement resource-level authorization for the multi-tenant API.
 
 The pattern:
@@ -2027,7 +2097,7 @@ repositories to extend it, and add integration tests that verify:
 
 #### Step 4: API Key System (10 min)
 
-```
+```text
 Implement the API key system for service-to-service authentication:
 
 1. API key format: prefix_base64secret (e.g., sk_live_abc123...)
@@ -2059,9 +2129,10 @@ Test: create API key -> use it to call protected endpoint ->
 verify scoping works -> rotate key -> verify old key rejected.
 ```
 
----
+</details>
 
-### Playbook 9: React Frontend with Design System Integration
+<details>
+<summary><h3>Playbook 9: React Frontend with Design System Integration</h3></summary>
 
 **Scenario**: Build a production frontend with a consistent design system, complex state management, and comprehensive testing.
 
@@ -2071,7 +2142,7 @@ verify scoping works -> rotate key -> verify old key rejected.
 claude --permission-mode plan
 ```
 
-```
+```text
 Analyze the existing shadcn/ui components installed in this project
 and produce a design system inventory:
 
@@ -2104,7 +2175,7 @@ Output as structured markdown for use as implementation context.
 
 #### Step 2: Build Missing Composite Components (15 min)
 
-```
+```text
 Build the missing composite components identified in the
 design system inventory. For each component:
 
@@ -2143,7 +2214,7 @@ renders each variant.
 
 #### Step 3: Implement Core Pages (30 min)
 
-```
+```text
 Implement the application pages using the composite components.
 
 Page 1 - Dashboard (/dashboard):
@@ -2152,7 +2223,7 @@ Page 1 - Dashboard (/dashboard):
 - Recent activity feed (last 20 actions across all projects)
 - My tasks section: tasks assigned to current user, grouped by project
 - Quick actions: new project, new task buttons
-- Use React Query for all data fetching, no loading spinners---
+- Use React Query for all data fetching, no loading spinners—
   use Suspense boundaries with PageSkeleton fallbacks
 
 Page 2 - Project List (/projects):
@@ -2187,7 +2258,7 @@ Test each page renders correctly with MSW mocking the API.
 
 #### Step 4: State Management and Optimistic Updates (10 min)
 
-```
+```text
 Implement optimistic updates for the interactive features:
 
 1. Task status change (drag-and-drop on Kanban board):
@@ -2219,7 +2290,7 @@ the error/rollback paths using MSW to simulate failures.
 
 #### Step 5: E2E Tests (10 min)
 
-```
+```text
 Write Playwright E2E tests for the critical user journeys:
 
 Test 1 - Onboarding flow:
@@ -2248,6 +2319,7 @@ Use seeded data for consistent test state.
 Run with: npx playwright test
 ```
 
+</details>
 
 ## Hooks and Automation Recipes
 
@@ -2331,7 +2403,6 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
 }
 ```
 
-
 ## Best Practices and Anti-Patterns
 
 ### Best Practices
@@ -2368,7 +2439,8 @@ When implementation requires extensive codebase exploration, delegate the resear
 
 Commit `CLAUDE.md`, `.claude/settings.json`, and `.claude/agents/` to your repository. These are team assets that improve everyone's experience with Claude Code.
 
-### Anti-Patterns
+> [!CAUTION]
+> ### Anti-Patterns
 
 #### 1. The "Build Me Everything" Prompt
 
@@ -2397,7 +2469,6 @@ Not all CI tasks require the most capable model. Use Haiku for simple formatting
 #### 7. No Permission Configuration
 
 Running without `.claude/settings.json` permissions means constant approval prompts in interactive mode or security risks in headless mode. Configure explicit allow/deny lists.
-
 
 ## Appendix A: Quick Reference Card
 
@@ -2430,21 +2501,21 @@ Running without `.claude/settings.json` permissions means constant approval prom
 ### Prompt Templates
 
 **Feature implementation:**
-```
+```text
 Implement [specific component] following the pattern in [existing file].
 Reference the interface defined in [contract file].
 Run [test command] when done.
 ```
 
 **Code review:**
-```
+```text
 Review the changes in this PR against the standards in CLAUDE.md.
 Focus on: [specific concerns].
 Post comments on specific lines, not general observations.
 ```
 
 **Infrastructure:**
-```
+```text
 Generate Terraform for [resource] in [environment directory].
 Use the module pattern in [existing module path].
 Variables should follow the naming convention in [variables file].
@@ -2452,13 +2523,12 @@ Validate with terraform plan.
 ```
 
 **Bug investigation:**
-```
+```text
 [Bug description and reproduction steps]
 1. Find the code path involved
 2. Identify the root cause
 3. Produce a root cause analysis before suggesting fixes
 ```
-
 
 ## Appendix B: CLAUDE.md Templates
 
