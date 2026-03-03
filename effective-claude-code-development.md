@@ -18,6 +18,8 @@
   - [The CLAUDE.md Hierarchy](#the-claudemd-hierarchy)
   - [Settings and Permissions](#settings-and-permissions)
   - [Memory Files for Evolving Context](#memory-files-for-evolving-context)
+  - [MCP Servers for External Context](#mcp-servers-for-external-context)
+  - [Custom Agents for Reusable Workflows](#custom-agents-for-reusable-workflows)
 - [The Metadata Generation Workflow](#the-metadata-generation-workflow)
   - [Phase 1: Architecture Discovery with Plan Mode](#phase-1-architecture-discovery-with-plan-mode)
   - [Phase 2: Interface Contract Generation](#phase-2-interface-contract-generation)
@@ -107,7 +109,9 @@ These artifacts are both **human-readable documentation** and **machine-consumab
 
 ## Configuring Claude Code for Production Use
 
-Before writing a single line of code, proper configuration determines the quality ceiling of everything Claude Code produces. This section covers the configuration hierarchy and practical setup patterns.
+Before writing a single line of code, proper configuration determines the quality ceiling of everything Claude Code produces. This investment is analogous to setting up a development environment—you wouldn't start coding without a linter, formatter, and test runner configured. The same principle applies to AI-assisted development: Claude Code's output quality is directly bounded by the context and constraints you provide upfront.
+
+For new projects, the `/init` command (run inside an interactive Claude Code session) generates a starter `CLAUDE.md` by analyzing your project structure, package files, and existing conventions. This gives you a working baseline to refine rather than starting from a blank file—and it demonstrates the metadata-first principle in action, since Claude Code uses the same analytical capabilities described in this guide to produce the initial configuration.
 
 ### The CLAUDE.md Hierarchy
 
@@ -234,10 +238,79 @@ Claude Code's auto-memory (`~/.claude/projects/<project>/memory/`) captures lear
 
 Memory files bridge sessions. When you discover that a particular test requires a specific environment variable or that a certain API endpoint has an undocumented constraint, record it in memory so future sessions start with that knowledge.
 
+### MCP Servers for External Context
+
+The metadata-first approach works best when Claude Code can access the same reference sources your team uses. Model Context Protocol (MCP) servers extend Claude Code's reach beyond your local filesystem to external documentation, APIs, and tools.
+
+Why this matters: without MCP, Claude Code generates Terraform using whatever provider syntax it learned during training—which may be outdated. With the Terraform Registry MCP server connected, it pulls the current resource schema before generating code, eliminating version drift.
+
+Configure MCP servers in `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "terraform-registry": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/terraform-mcp-server"]
+    },
+    "aws-docs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "aws-documentation-mcp-server"]
+    }
+  }
+}
+```
+
+Common MCP server use cases for development teams:
+
+| MCP Server | Purpose | Why It Helps |
+|------------|---------|--------------|
+| Terraform Registry | Provider docs, module search | Ensures generated HCL uses current resource arguments |
+| AWS Documentation | Service docs, API references | Grounds infrastructure decisions in official docs |
+| Database | Schema introspection | Lets Claude Code query your actual schema instead of guessing |
+| Custom internal | Company standards, runbooks | Enforces org-specific patterns Claude Code can't learn from public data |
+
+MCP servers are particularly valuable in CI/CD pipelines where Claude Code runs headless—they provide the same reference context that a developer would manually look up.
+
+### Custom Agents for Reusable Workflows
+
+As your team develops recurring Claude Code workflows—code review checklists, migration patterns, security audits—you can codify them as custom agents. Custom agents are persistent prompt templates that encapsulate domain expertise, preventing each team member from having to rediscover the right prompting patterns.
+
+Define agents in `.claude/agents/<name>/AGENT.md`:
+
+```markdown
+# Security Reviewer
+
+You are a security-focused code reviewer. When invoked, analyze the
+provided code changes for OWASP Top 10 vulnerabilities.
+
+For each finding:
+1. Classify severity (Critical/High/Medium/Low)
+2. Cite the specific CWE number
+3. Show the vulnerable code with line numbers
+4. Provide the fixed version
+
+Check these categories in order:
+- Injection (SQL, command, LDAP)
+- Broken authentication and session management
+- Sensitive data exposure (logs, error messages, API responses)
+- Access control bypasses
+- Security misconfiguration
+
+Reference the project's security conventions in CLAUDE.md.
+Output as structured markdown with a summary table.
+```
+
+Use the agent with `claude --agent security-reviewer` or by typing `/agents` in an interactive session. Custom agents pair well with the playbooks later in this document—you can create an agent for each playbook to make it a one-command operation.
+
 ## The Metadata Generation Workflow
 
 > [!TIP]
 > This section describes the core methodology: generating structured metadata *before* implementation. This is where the highest ROI exists in AI-assisted development.
+
+The workflow spans multiple Claude Code sessions. This is intentional—separating discovery from implementation prevents the common mistake of rushing into code before understanding the problem space. Use `claude --continue` (or `claude -c`) to resume your most recent session in the current directory, preserving the full conversation context. This means your discovery session's artifacts, decisions, and conventions carry forward into the implementation session without re-explaining them.
 
 ### Phase 1: Architecture Discovery with Plan Mode
 
@@ -779,6 +852,8 @@ The seed should be runnable with a single command (document it in CLAUDE.md).
 Also generate a minimal fixture set for integration tests: 1 customer,
 1 order, 2 items—just enough to test the happy path without slow setup.
 ```
+
+With schema, migrations, queries, indexes, and seed data in place, the database layer becomes a stable foundation that the rest of the application builds on. The patterns above—designing schemas from entity-relationship metadata, separating additive from constraint migrations, generating typed query layers—apply whether you're building a REST API, a GraphQL server, or a full-stack web application. The next section extends these patterns upward through the backend API and frontend layers.
 
 ## Web Application Development
 
@@ -2575,9 +2650,26 @@ Run with: npx playwright test
 
 ## Hooks and Automation Recipes
 
-Hooks extend Claude Code's behavior with automated actions at specific lifecycle points. These recipes show practical configurations for development teams.
+Hooks extend Claude Code's behavior with automated actions at specific lifecycle points. They let you enforce team standards automatically—formatting, security guardrails, audit logging—without relying on developers remembering to run tools manually.
+
+Hook commands receive a JSON object on **stdin** containing the tool name and input. This is how your hook script knows *what* Claude Code is doing (which tool, which file, which command) so it can react appropriately. The JSON structure looks like:
+
+```json
+{
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/path/to/file.ts",
+    "old_string": "...",
+    "new_string": "..."
+  }
+}
+```
+
+For `PreToolUse` hooks, returning exit code `2` blocks the tool call. For `PostToolUse` hooks, the exit code is informational. All recipes below use `jq` to parse the stdin JSON.
 
 ### Auto-Format After Edits
+
+Why: Claude Code produces correct code, but it may not match your team's exact formatting preferences (tab width, trailing commas, etc.). Running your formatter automatically after every edit ensures consistency without manual intervention.
 
 ```json
 {
@@ -2588,7 +2680,7 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
         "hooks": [
           {
             "type": "command",
-            "command": "prettier --write $CLAUDE_FILE_PATH 2>/dev/null || true"
+            "command": "jq -r '.tool_input.file_path' | xargs prettier --write 2>/dev/null || true"
           }
         ]
       }
@@ -2597,7 +2689,11 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
 }
 ```
 
+The `jq -r '.tool_input.file_path'` extracts the edited file path from stdin, then `xargs` passes it to prettier. The `|| true` ensures the hook doesn't fail if prettier isn't configured for that file type.
+
 ### Block Dangerous Commands
+
+Why: in headless CI/CD pipelines or permissive interactive sessions, you want a safety net that prevents destructive operations regardless of the permission mode. This hook acts as a last line of defense.
 
 ```json
 {
@@ -2608,7 +2704,7 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
         "hooks": [
           {
             "type": "command",
-            "command": "echo $CLAUDE_TOOL_INPUT | jq -r '.command' | grep -qE '(rm -rf|drop table|truncate|--force|--hard)' && exit 2 || exit 0"
+            "command": "jq -r '.tool_input.command' | grep -qE '(rm -rf|drop table|truncate|--force|--hard)' && exit 2 || exit 0"
           }
         ]
       }
@@ -2617,7 +2713,11 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
 }
 ```
 
+Exit code `2` tells Claude Code to block this specific tool call. Claude Code will see the rejection and attempt an alternative approach. The `matcher: "Bash"` ensures this only runs for shell commands, not file reads or edits.
+
 ### Audit Trail
+
+Why: when Claude Code operates autonomously (headless mode, CI/CD), you need a record of every action it took. This is critical for compliance, debugging, and building trust with your team that AI-assisted changes are traceable.
 
 ```json
 {
@@ -2627,7 +2727,7 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
         "hooks": [
           {
             "type": "command",
-            "command": "echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) $CLAUDE_TOOL_NAME $(echo $CLAUDE_TOOL_INPUT | jq -c '.' 2>/dev/null)\" >> .claude/audit.log"
+            "command": "TS=$(date -u +%Y-%m-%dT%H:%M:%SZ); jq -c --arg ts \"$TS\" '{time: $ts, tool: .tool_name, input: .tool_input}' >> .claude/audit.log"
           }
         ]
       }
@@ -2635,6 +2735,8 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
   }
 }
 ```
+
+This logs every tool invocation as a single JSON line, making it easy to search and analyze with standard tools (`jq`, `grep`). No `matcher` means it fires for all tools.
 
 ### Desktop Notification on Completion
 
@@ -2752,10 +2854,12 @@ Running without `.claude/settings.json` permissions means constant approval prom
 | Start with plan mode | `claude --permission-mode plan` |
 | Run headless task | `claude -p "task"` |
 | Continue previous session | `claude --continue` |
+| Resume specific session | `claude --resume` |
 | Resume from PR | `claude --from-pr 123` |
+| Use custom agent | `claude --agent <name>` |
 | JSON output | `claude -p "task" --output-format json` |
 | Budget limit | `claude -p "task" --max-budget-usd 5.00` |
-| Initialize project | `/init` (inside session) |
+| Initialize project config | `/init` (inside session, generates starter CLAUDE.md) |
 | Toggle plan mode | `Shift+Tab` (inside session) |
 
 ### File Configuration Locations
@@ -2964,4 +3068,10 @@ Validate with terraform plan.
 
 ## Conclusion
 
-The gap between AI-assisted code generation and production-quality software is bridged by context. The metadata-first methodology described here—investing in `CLAUDE.md`, architecture decision records, interface contracts, and implementation checklists before writing code—transforms Claude Code from a generic autocomplete tool into an informed collaborator that understands your project's conventions, constraints, and patterns. Start with a well-crafted `CLAUDE.md`, use plan mode for your next feature, and measure the difference.
+The gap between AI-assisted code generation and production-quality software is bridged by context. The metadata-first methodology described here—investing in `CLAUDE.md`, architecture decision records, interface contracts, and implementation checklists before writing code—transforms Claude Code from a generic autocomplete tool into an informed collaborator that understands your project's conventions, constraints, and patterns.
+
+This guide covered the full lifecycle: configuring Claude Code with project-specific context (CLAUDE.md, settings, memory, MCP servers), generating structured metadata before implementation (plan mode, ADRs, interface contracts), applying that metadata through constrained implementation prompts (context references, subagents, test feedback), building web applications across the stack (backend APIs, frontend SPAs, shared contracts), automating quality gates in CI/CD (GitHub Actions, headless mode, cost management), and codifying infrastructure with the same metadata-driven rigor (Terraform, CDK).
+
+The underlying principle is simple: AI output quality is bounded by input quality. A 30-minute investment in structured context—before writing a single line of code—consistently saves hours of iterative correction. This compounds across sessions as memory files, custom agents, and CLAUDE.md evolve alongside your project.
+
+Start with a well-crafted `CLAUDE.md` for your most active project, use plan mode for your next feature, and measure the difference.
