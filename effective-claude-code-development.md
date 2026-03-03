@@ -27,6 +27,7 @@
   - [Subagent Delegation for Parallel Work](#subagent-delegation-for-parallel-work)
   - [Iterative Refinement with Test Feedback](#iterative-refinement-with-test-feedback)
   - [Working with Existing Codebases](#working-with-existing-codebases)
+  - [Database Schema Development](#database-schema-development)
 - [Web Application Development](#web-application-development)
   - [Backend API Development](#backend-api-development)
   - [Frontend Development](#frontend-development)
@@ -528,6 +529,256 @@ Produce a summary with file paths and line numbers.
 ```
 
 This produces a map of the existing auth system that Claude Code uses as context for any auth-related implementation, preventing it from reimplementing patterns that already exist.
+
+### Database Schema Development
+
+Database schema work is where upfront metadata pays compound returns—every table, index, and constraint you define correctly in the planning phase prevents cascading errors through the repository, service, and handler layers above it.
+
+#### Schema Design with Entity-Relationship Metadata
+
+Start by generating a structured entity-relationship document before writing any SQL:
+
+```text
+Design the database schema for an order management system.
+
+Entities and relationships:
+- Customer (1) → (many) Order
+- Order (1) → (many) OrderItem
+- Product (1) → (many) OrderItem
+- Order (1) → (many) OrderStatusHistory
+
+For each entity, define:
+1. Table name (snake_case, plural)
+2. All columns with: name, type, nullable, default, constraints
+3. Primary key strategy (UUID v7 for sortable IDs, or BIGSERIAL)
+4. Foreign keys with ON DELETE behavior (CASCADE, SET NULL, RESTRICT)
+5. Unique constraints and check constraints
+6. Created/updated timestamps with timezone
+
+Normalization requirements:
+- 3NF minimum, denormalize only with explicit justification
+- Money fields use NUMERIC(12,2), not FLOAT
+- Status fields use PostgreSQL ENUMs defined as separate types
+- All text fields have explicit max length via CHECK constraints
+
+Output as a SQL DDL script with comments explaining each design decision.
+```
+
+Pair this with a Mermaid ER diagram for visual reference:
+
+```text
+Generate a Mermaid ER diagram for the schema you just designed.
+Use the erDiagram syntax with relationship cardinality labels.
+Include the key columns in each entity box.
+```
+
+This produces a diagram Claude Code can reference in future sessions:
+
+```mermaid
+erDiagram
+    customers ||--o{ orders : places
+    orders ||--|{ order_items : contains
+    products ||--o{ order_items : "included in"
+    orders ||--o{ order_status_history : tracks
+
+    customers {
+        uuid id PK
+        varchar email UK
+        varchar name
+        timestamptz created_at
+    }
+    orders {
+        uuid id PK
+        uuid customer_id FK
+        order_status status
+        numeric total_amount
+        timestamptz created_at
+    }
+    order_items {
+        uuid id PK
+        uuid order_id FK
+        uuid product_id FK
+        int quantity
+        numeric unit_price
+    }
+```
+
+#### Migration Workflow Patterns
+
+**Initial schema generation:**
+
+```text
+Generate a database migration for the order management schema.
+
+Migration tool: goose (Go) / Drizzle Kit (TypeScript) / Alembic (Python)
+Convention: sequential numbering, descriptive names
+Location: migrations/ (or drizzle/ or alembic/versions/)
+
+Requirements:
+- Separate migration per logical group (users, orders, indexes)
+- Every migration MUST include a rollback (down migration)
+- Use IF NOT EXISTS for idempotent index creation
+- Create ENUMs as separate types before the tables that use them
+- Add comments on columns that aren't self-documenting
+
+Verify each migration applies cleanly against an empty database
+and rolls back without errors.
+```
+
+**Iterative schema changes (the common case):**
+
+```text
+I need to add a "shipping_address" to orders. Generate a migration that:
+
+1. Creates an addresses table (street, city, state, postal_code, country)
+2. Adds a shipping_address_id FK to the orders table
+3. Backfills existing orders with a NULL shipping address
+4. Does NOT make the FK non-nullable yet (that's a separate migration
+   after backfill is confirmed in production)
+
+Follow the existing migration pattern in migrations/.
+Include the down migration that reverses each step in order.
+```
+
+> [!TIP]
+> Always separate additive changes (new columns, new tables) from constraint tightening (adding NOT NULL, dropping columns). This makes rollbacks safe and allows zero-downtime deployments.
+
+#### Query Layer Generation
+
+The query layer is where schema metadata meets application code. Different ORMs and query builders need different prompts:
+
+**sqlc (Go) — SQL-first, type-safe:**
+
+```text
+Generate sqlc queries for the orders table in queries/orders.sql.
+
+Required operations:
+- ListByCustomer: cursor pagination with status filter
+- GetByID: single order with items (use a CTE or separate query)
+- Create: insert order + items in a single transaction
+- UpdateStatus: with optimistic locking (WHERE status = $current_status)
+- SoftDelete: set deleted_at, don't remove the row
+
+Follow the existing query patterns in queries/users.sql.
+Use sqlc annotations (-- name: QueryName :many/:one/:exec).
+After generating, run `sqlc generate` and verify the output compiles.
+```
+
+**Drizzle ORM (TypeScript) — schema-as-code:**
+
+```text
+Generate the Drizzle ORM schema for the order management tables
+in src/db/schema/orders.ts.
+
+Map the SQL types:
+- UUID → uuid() with defaultRandom()
+- NUMERIC(12,2) → numeric({ precision: 12, scale: 2 })
+- ENUM → pgEnum() defined at the top of the file
+- TIMESTAMPTZ → timestamp({ withTimezone: true, mode: 'date' })
+
+Include:
+- Relations using the relations() helper
+- Inferred types: export type Order = typeof orders.$inferSelect
+- Insert types: export type NewOrder = typeof orders.$inferInsert
+
+Follow the existing schema pattern in src/db/schema/users.ts.
+Run `pnpm drizzle-kit generate` to create the migration.
+```
+
+**Prisma (TypeScript) — schema-first:**
+
+```text
+Add the order management models to prisma/schema.prisma.
+
+Follow the existing conventions:
+- Model names: PascalCase singular (Order, not orders)
+- Field names: camelCase
+- Use @map/@@@map for snake_case table/column names
+- Enum definitions above the models that use them
+- Relation names on both sides of every relationship
+- @@index for query-pattern indexes (see below)
+
+After updating the schema:
+1. Run `npx prisma migrate dev --name add_orders`
+2. Run `npx prisma generate`
+3. Verify the client types are correct
+```
+
+**SQLAlchemy (Python) — mapped classes:**
+
+```text
+Generate SQLAlchemy 2.0 mapped classes for the order management
+tables in app/models/order.py.
+
+Use the DeclarativeBase with Mapped[] type annotations:
+- Mapped[uuid.UUID] for UUIDs
+- Mapped[Decimal] for money fields
+- Mapped[OrderStatus] for the enum (define with Python enum + SQLAlchemy Enum)
+- Mapped[datetime] with server_default=func.now()
+
+Include:
+- Relationship() with back_populates on both sides
+- __tablename__ matching the SQL table name
+- Repr with key fields only (no sensitive data)
+
+Follow the pattern in app/models/user.py.
+Run `alembic revision --autogenerate -m "add orders"` and review
+the generated migration before applying.
+```
+
+#### Index and Performance Metadata
+
+Indexes are where most schema performance problems live. Give Claude Code your query patterns upfront:
+
+```text
+Review the order management schema and generate indexes based on
+these query patterns:
+
+1. List orders by customer, sorted by created_at DESC (most common)
+2. Filter orders by status within a date range
+3. Look up order items by order_id (always fetched together)
+4. Search orders by customer email (JOIN through customers table)
+5. Dashboard: count orders by status for a given date range
+
+For each index, provide:
+- CREATE INDEX statement with CONCURRENTLY option
+- Which query it serves (reference by number above)
+- Estimated selectivity and why this index helps
+- Whether it should be a partial index (e.g., WHERE deleted_at IS NULL)
+- Storage cost tradeoff (wide indexes on large tables)
+
+Put these in a dedicated migration: migrations/000016_add_order_indexes.sql
+Include the down migration (DROP INDEX CONCURRENTLY).
+```
+
+> [!NOTE]
+> Include `CONCURRENTLY` in index creation for production databases—Claude Code won't add it by default since it's a PostgreSQL-specific extension to standard SQL.
+
+#### Seed Data and Test Fixtures
+
+Realistic seed data makes development and testing more effective:
+
+```text
+Generate a database seed script for local development.
+
+Requirements:
+- 3 customers with different order histories:
+  - "Active Customer": 50 orders across all statuses, spanning 6 months
+  - "New Customer": 2 orders, both pending, created today
+  - "Churned Customer": 10 orders, all completed, last one 1 year ago
+- Realistic product catalog: 20 products across 4 categories
+- Order items: 1-5 items per order, realistic quantities and prices
+- Use deterministic IDs (UUID v5 from names) so seeds are idempotent
+
+Format:
+- For Go/sqlc: a Go file using the generated queries
+- For Drizzle: a TypeScript seed file using the schema
+- For SQLAlchemy: a Python script using the models
+
+The seed should be runnable with a single command (document it in CLAUDE.md).
+Also generate a minimal fixture set for integration tests: 1 customer,
+1 order, 2 items—just enough to test the happy path without slow setup.
+```
 
 ## Web Application Development
 
