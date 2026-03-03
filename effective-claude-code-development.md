@@ -30,6 +30,11 @@
   - [Iterative Refinement with Test Feedback](#iterative-refinement-with-test-feedback)
   - [Working with Existing Codebases](#working-with-existing-codebases)
   - [Database Schema Development](#database-schema-development)
+- [Testing Strategy with Claude Code](#testing-strategy-with-claude-code)
+  - [Why Test-First with AI Assistants](#why-test-first-with-ai-assistants)
+  - [Generating Comprehensive Test Suites](#generating-comprehensive-test-suites)
+  - [The Test-Fix Loop](#the-test-fix-loop)
+  - [Test Quality and Maintenance](#test-quality-and-maintenance)
 - [Web Application Development](#web-application-development)
   - [Backend API Development](#backend-api-development)
   - [Frontend Development](#frontend-development)
@@ -71,7 +76,7 @@ This guide assumes you have:
 
 - **Claude Code installed** and authenticated (`npm install -g @anthropic-ai/claude-code`)
 - **Basic familiarity** with running Claude Code interactively (`claude` in your terminal)
-- **A software project** you want to apply these techniques to—the examples use Go, TypeScript, and Python, but the methodology is language-agnostic
+- **A software project** you want to apply these techniques to—the examples use Java, TypeScript, and Python, but the methodology is language-agnostic
 
 No prior experience with `CLAUDE.md`, plan mode, or headless mode is required—those are covered in detail below.
 
@@ -81,7 +86,7 @@ No prior experience with `CLAUDE.md`, plan mode, or headless mode is required—
 
 The most common failure mode with AI coding assistants is the "blank prompt" approach: opening a tool and typing "build me a REST API." The result is generic code that doesn't match your project's conventions, uses the wrong libraries, targets the wrong runtime, and requires extensive manual correction. Each correction cycle wastes context window tokens and developer time.
 
-This happens because the AI lacks **project-specific context**. It doesn't know your team uses Go with Chi router instead of Gin. It doesn't know your CI pipeline runs on GitHub Actions with a specific linting configuration. It doesn't know your infrastructure lives in Terraform with a particular module structure.
+This happens because the AI lacks **project-specific context**. It doesn't know your team uses Java 21 with Spring Boot instead of Jakarta EE. It doesn't know your CI pipeline runs on GitHub Actions with a specific linting configuration. It doesn't know your infrastructure lives in Terraform with a particular module structure.
 
 ### The Metadata-First Approach
 
@@ -89,7 +94,7 @@ This whitepaper introduces a structured methodology where you **generate and mai
 
 | Artifact | Purpose | Example |
 |----------|---------|---------|
-| `CLAUDE.md` | Project conventions, build commands, architecture | "Use Go 1.22, Chi router, sqlc for queries" |
+| `CLAUDE.md` | Project conventions, build commands, architecture | "Use Java 21, Spring Boot 3.x, Spring Data JPA for queries" |
 | Architecture Decision Records | Design rationale and constraints | "ADR-003: Use event sourcing for order service" |
 | Interface Contracts | API schemas, protobuf definitions | OpenAPI spec, `.proto` files |
 | Dependency Maps | Service relationships and data flow | Mermaid diagrams in markdown |
@@ -137,43 +142,43 @@ A production `CLAUDE.md` should be under 200 lines and cover these categories:
 # Project: order-service
 
 ## Build & Test
-- Language: Go 1.22
-- Build: `go build ./cmd/server`
-- Test: `go test ./... -race -count=1`
-- Lint: `golangci-lint run`
-- DB migrations: `goose -dir migrations postgres "$DATABASE_URL" up`
+- Language: Java 21, Spring Boot 3.3
+- Build: `./gradlew build`
+- Test: `./gradlew test`
+- Lint: `./gradlew checkstyleMain spotbugsMain`
+- DB migrations: Flyway (auto-runs on startup, or `./gradlew flywayMigrate`)
 
 ## Architecture
-- Clean architecture: handlers -> services -> repositories
-- All business logic in `internal/service/`
-- Database access only through `internal/repository/`
-- HTTP handlers in `internal/handler/` using Chi router
-- Config via environment variables, parsed in `internal/config/`
+- Clean architecture: controllers -> services -> repositories
+- All business logic in `service/`
+- Database access only through `repository/` (Spring Data JPA interfaces)
+- REST controllers in `controller/` using Spring Web MVC
+- Config via `application.yml` with `@ConfigurationProperties` classes
 
 ## Code Conventions
-- Errors: use `fmt.Errorf("operation: %w", err)` wrapping pattern
-- Context: pass `context.Context` as first parameter to all service/repo methods
-- Logging: use `slog` structured logging, no `log.Printf`
-- Tests: table-driven tests with `t.Run()` subtests
-- Naming: `NewServiceName()` constructors, `ServiceNameOption` for functional options
+- Exceptions: domain exceptions extend `RuntimeException`, handled by `@ControllerAdvice`
+- Logging: use SLF4J (`private static final Logger log = LoggerFactory.getLogger(...)`)
+- Tests: JUnit 5 `@ParameterizedTest` for variations, `@Nested` for grouping
+- Naming: `OrderService`, `OrderRepository`, `OrderController` (no `Impl` suffix on JPA interfaces)
+- DTOs: Java records (`public record CreateOrderRequest(...)`) for immutable request/response types
 
 ## Database
-- PostgreSQL 16, managed via sqlc
-- Queries in `queries/*.sql`, generated code in `internal/db/`
-- Run `sqlc generate` after modifying queries
-- Migrations use goose, sequential numbering
+- PostgreSQL 16, managed via Spring Data JPA
+- Entity classes in `entity/`, repository interfaces in `repository/`
+- Flyway migrations in `src/main/resources/db/migration/` (V1__description.sql format)
+- Custom queries via `@Query` annotation or Criteria API for complex joins
 
 ## API
-- REST API with OpenAPI 3.1 spec in `api/openapi.yaml`
-- Request/response types generated from OpenAPI spec
-- All endpoints require authentication via JWT middleware
-- Pagination: cursor-based, not offset-based
+- REST API with OpenAPI 3.1 spec (generated by springdoc-openapi)
+- Request/response DTOs as Java records with Jakarta Validation annotations
+- All endpoints require authentication via Spring Security JWT filter
+- Pagination: cursor-based using custom `CursorPageable`
 
 ## Dependencies
-- Chi v5 for routing
-- sqlc for type-safe SQL
-- goose for schema migrations
-- testcontainers-go for integration tests
+- Spring Web MVC for routing
+- Spring Data JPA for type-safe data access
+- Flyway for schema migrations
+- Testcontainers for integration tests
 ```
 
 > [!WARNING]
@@ -194,14 +199,13 @@ Project settings in `.claude/settings.json` control tool access and behavior:
       "Read",
       "Glob",
       "Grep",
-      "Bash(go build ./...)",
-      "Bash(go test ./...)",
-      "Bash(golangci-lint run)",
-      "Bash(sqlc generate)",
-      "Bash(goose *)",
+      "Bash(./gradlew build)",
+      "Bash(./gradlew test)",
+      "Bash(./gradlew checkstyleMain spotbugsMain)",
+      "Bash(./gradlew flywayMigrate)",
       "Bash(git *)",
       "Bash(gh *)",
-      "Bash(make *)"
+      "Bash(./gradlew *)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -224,11 +228,11 @@ Claude Code's auto-memory (`~/.claude/projects/<project>/memory/`) captures lear
 ## Project State
 - Current sprint: implementing order history endpoint
 - Database schema v14 is deployed to staging
-- PR #234 introduced the new pagination helper in `internal/pagination/`
+- PR #234 introduced the new pagination helper in `util/CursorPageable.java`
 
 ## Known Issues
 - Integration tests require Docker running (testcontainers)
-- The `order_items` table has a composite index that sqlc doesn't detect automatically
+- The `order_items` table has a composite index; add a custom `@Query` for the paginated lookup
 - CI flakes on `TestWebhookDelivery` due to timing; use `retry` wrapper
 
 ## Patterns Discovered
@@ -404,7 +408,7 @@ clients (base64-encoded).
 - Cannot jump to arbitrary pages (no "page 47 of 200")
 - Requires a stable sort order (created_at DESC, order_id DESC)
 - Cursor must be validated server-side to prevent injection
-- Existing `internal/pagination/cursor.go` helper can be reused
+- Existing `util/CursorPageable.java` helper can be reused
 ```
 
 This ADR, stored in your repository, becomes context that Claude Code uses in future sessions when implementing pagination-related features.
@@ -436,23 +440,24 @@ envelope structure used by other endpoints.
 Generate a SQL migration for the order history feature:
 
 - New index on orders table for (tenant_id, status, created_at DESC)
-- Follow the existing migration pattern in migrations/
-- Use goose format with sequential numbering
-- Include both up and down migrations
+- Follow the existing migration pattern in src/main/resources/db/migration/
+- Use Flyway V-prefix format (V15__add_order_history_index.sql)
+- Flyway does not support down migrations by default; document rollback SQL in a comment
 ```
 
 #### Interface Definition
 
 ```text
-Define the Go interfaces for the order history feature following
+Define the Java interfaces for the order history feature following
 the existing clean architecture pattern:
 
-1. Repository interface in internal/repository/order.go
-2. Service interface in internal/service/order.go
-3. Handler registration in internal/handler/order.go
+1. Repository interface in repository/OrderRepository.java (extends JpaRepository)
+   and repository/OrderRepositoryCustom.java (for cursor pagination)
+2. Service interface in service/OrderService.java
+3. Controller in controller/OrderController.java
 
 Only define the interfaces and method signatures. Do not implement
-the methods yet. Include godoc comments describing each method's
+the methods yet. Include Javadoc comments describing each method's
 contract, parameters, and error conditions.
 ```
 
@@ -479,44 +484,45 @@ Example output:
 ## Implementation Checklist: Order History Feature
 
 ### Database Layer
-- [ ] 1. Create migration `migrations/000015_add_order_history_index.sql`
+- [ ] 1. Create migration `src/main/resources/db/migration/V15__add_order_history_index.sql`
   - Add composite index: `(tenant_id, status, created_at DESC, id DESC)`
-  - Verify: `goose -dir migrations postgres "$DATABASE_URL" up`
+  - Verify: `./gradlew flywayMigrate` (or start app and check Flyway output)
 
-- [ ] 2. Add query in `queries/orders.sql`
-  - `ListOrdersByTenant` with cursor pagination and optional status filter
-  - Verify: `sqlc generate` succeeds without errors
+- [ ] 2. Add custom query method in `repository/OrderRepository.java`
+  - `findByTenantIdAndStatusOrderByCreatedAtDesc` with cursor pagination
+  - Verify: `./gradlew test --tests '*OrderRepositoryTest*'`
 
-- [ ] 3. Verify generated code in `internal/db/orders.sql.go`
-  - Confirm generated types match expected interface
-  - Verify: `go build ./internal/db/...`
+- [ ] 3. Verify JPA entity mapping in `entity/Order.java`
+  - Confirm entity fields match migration columns, relationships mapped correctly
+  - Verify: `./gradlew build` (compilation check)
 
 ### Repository Layer
-- [ ] 4. Implement `OrderRepository.ListByTenant()` in
-       `internal/repository/order.go`
-  - Decode cursor, execute query, encode next cursor
-  - Verify: `go test ./internal/repository/... -run TestListByTenant`
+- [ ] 4. Implement `OrderRepositoryCustomImpl.listByTenant()` in
+       `repository/OrderRepositoryCustomImpl.java`
+  - Decode cursor, build Criteria query or native SQL, encode next cursor
+  - Verify: `./gradlew test --tests '*OrderRepositoryTest.listByTenant*'`
 
 ### Service Layer
-- [ ] 5. Implement `OrderService.GetHistory()` in
-       `internal/service/order.go`
+- [ ] 5. Implement `OrderService.getHistory()` in
+       `service/OrderServiceImpl.java`
   - Validate pagination params, call repository, map to response DTOs
-  - Verify: `go test ./internal/service/... -run TestGetHistory`
+  - Verify: `./gradlew test --tests '*OrderServiceTest.getHistory*'`
 
-### Handler Layer
-- [ ] 6. Implement `OrderHandler.ListOrders()` in
-       `internal/handler/order.go`
-  - Parse query params, call service, render paginated JSON response
-  - Register route: `r.Get("/api/v1/orders", h.ListOrders)`
-  - Verify: `go test ./internal/handler/... -run TestListOrders`
+### Controller Layer
+- [ ] 6. Implement `OrderController.listOrders()` in
+       `controller/OrderController.java`
+  - Parse query params, call service, return paginated JSON response
+  - Map route: `@GetMapping("/api/v1/orders")`
+  - Verify: `./gradlew test --tests '*OrderControllerTest.listOrders*'`
 
 ### Integration
-- [ ] 7. Add integration test in `tests/integration/order_history_test.go`
+- [ ] 7. Add integration test in `src/test/java/.../OrderHistoryIntegrationTest.java`
+  - Uses `@SpringBootTest` with Testcontainers PostgreSQL
   - Test full flow: create orders -> paginate -> verify cursor behavior
-  - Verify: `go test ./tests/integration/... -run TestOrderHistoryIntegration`
+  - Verify: `./gradlew test --tests '*OrderHistoryIntegrationTest*'`
 
-- [ ] 8. Update OpenAPI spec `api/openapi.yaml` (already drafted)
-  - Verify: `oapi-codegen -verify api/openapi.yaml`
+- [ ] 8. Update OpenAPI spec (already drafted)
+  - Verify: compile-time validation via springdoc-openapi
 ```
 
 This checklist is the bridge between planning and implementation. Each step is specific enough that Claude Code can execute it independently, and each has a verification command so you can confirm correctness before moving to the next step.
@@ -530,13 +536,13 @@ With metadata in place, implementation becomes a series of constrained, verifiab
 The most effective implementation prompts reference the metadata you've already created:
 
 ```text
-Implement step 4 from the implementation checklist: OrderRepository.ListByTenant()
+Implement step 4 from the implementation checklist: OrderRepositoryCustom.listByTenant()
 
 Context:
-- The sqlc-generated types are in internal/db/orders.sql.go
-- The cursor pagination helper is in internal/pagination/cursor.go
-- Follow the existing repository pattern in internal/repository/user.go
-- The interface contract is defined in internal/repository/interfaces.go
+- The JPA entity is in entity/Order.java
+- The cursor pagination helper is in util/CursorPageable.java
+- Follow the existing repository pattern in repository/UserRepositoryCustomImpl.java
+- The interface contract is defined in repository/OrderRepositoryCustom.java
 
 Implement the method body. Run the tests when done.
 ```
@@ -574,13 +580,14 @@ When tests fail, provide the failure output as context for the fix:
 ```text
 The integration test is failing with this output:
 
---- FAIL: TestOrderHistoryIntegration/pagination_returns_correct_cursor
-    order_history_test.go:87: expected next_cursor to be non-empty
-    for first page, got ""
+OrderHistoryIntegrationTest > paginationReturnsCorrectCursor FAILED
+    org.opentest4j.AssertionFailedError:
+    expected next_cursor to be non-empty for first page, got ""
+    at OrderHistoryIntegrationTest.java:87
 
-The cursor encoding in internal/pagination/cursor.go uses base64.
+The cursor encoding in util/CursorPageable.java uses Base64.
 Check if the repository is correctly passing the last row's
-(created_at, id) tuple to the cursor encoder.
+(createdAt, id) tuple to the cursor encoder.
 ```
 
 This is more effective than "fix the test" because it narrows the search space and points Claude Code toward the likely root cause.
@@ -683,9 +690,9 @@ erDiagram
 ```text
 Generate a database migration for the order management schema.
 
-Migration tool: goose (Go) / Drizzle Kit (TypeScript) / Alembic (Python)
-Convention: sequential numbering, descriptive names
-Location: migrations/ (or drizzle/ or alembic/versions/)
+Migration tool: Flyway (Java) / Drizzle Kit (TypeScript) / Alembic (Python)
+Convention: V-prefix numbering, descriptive names (V1__create_users.sql)
+Location: src/main/resources/db/migration/ (or drizzle/ or alembic/versions/)
 
 Requirements:
 - Separate migration per logical group (users, orders, indexes)
@@ -720,21 +727,24 @@ Include the down migration that reverses each step in order.
 
 The query layer is where schema metadata meets application code. Different ORMs and query builders need different prompts:
 
-**sqlc (Go) — SQL-first, type-safe:**
+**Spring Data JPA (Java) — interface-driven, type-safe:**
 
 ```text
-Generate sqlc queries for the orders table in queries/orders.sql.
+Define the Spring Data JPA repository for the orders table in
+repository/OrderRepository.java.
 
 Required operations:
-- ListByCustomer: cursor pagination with status filter
-- GetByID: single order with items (use a CTE or separate query)
-- Create: insert order + items in a single transaction
-- UpdateStatus: with optimistic locking (WHERE status = $current_status)
-- SoftDelete: set deleted_at, don't remove the row
+- findByCustomerIdOrderByCreatedAtDesc: cursor pagination with status filter
+  (use a custom @Query with native SQL or Criteria API for cursor logic)
+- findById: single order (use @EntityGraph to eager-fetch items)
+- save: insert order + items via cascade (JPA manages the transaction)
+- updateStatus: with optimistic locking (@Version field on the entity)
+- softDelete: set deletedAt, use @SQLRestriction("deleted_at IS NULL")
 
-Follow the existing query patterns in queries/users.sql.
-Use sqlc annotations (-- name: QueryName :many/:one/:exec).
-After generating, run `sqlc generate` and verify the output compiles.
+Follow the existing repository patterns in repository/UserRepository.java.
+Use Spring Data derived query methods where possible; fall back to
+@Query(nativeQuery = true) for complex pagination.
+After defining the interface, verify with `./gradlew test --tests '*OrderRepositoryTest*'`.
 ```
 
 **Drizzle ORM (TypeScript) — schema-as-code:**
@@ -844,7 +854,7 @@ Requirements:
 - Use deterministic IDs (UUID v5 from names) so seeds are idempotent
 
 Format:
-- For Go/sqlc: a Go file using the generated queries
+- For Spring Data JPA: a Java class using CommandLineRunner with repository injection
 - For Drizzle: a TypeScript seed file using the schema
 - For SQLAlchemy: a Python script using the models
 
@@ -853,7 +863,295 @@ Also generate a minimal fixture set for integration tests: 1 customer,
 1 order, 2 items—just enough to test the happy path without slow setup.
 ```
 
-With schema, migrations, queries, indexes, and seed data in place, the database layer becomes a stable foundation that the rest of the application builds on. The patterns above—designing schemas from entity-relationship metadata, separating additive from constraint migrations, generating typed query layers—apply whether you're building a REST API, a GraphQL server, or a full-stack web application. The next section extends these patterns upward through the backend API and frontend layers.
+With schema, migrations, queries, indexes, and seed data in place, the database layer becomes a stable foundation that the rest of the application builds on. The patterns above—designing schemas from entity-relationship metadata, separating additive from constraint migrations, generating typed query layers—apply whether you're building a REST API, a GraphQL server, or a full-stack web application. Before moving to web application patterns, the next section covers testing—the discipline that makes AI-generated code trustworthy.
+
+## Testing Strategy with Claude Code
+
+Testing is where AI-assisted development delivers its most measurable ROI. Tests are simultaneously:
+
+1. **Specifications** that constrain what Claude Code generates
+2. **Verification** that the generated code actually works
+3. **Regression guards** that catch future AI-generated regressions
+
+This section covers how to use Claude Code to build comprehensive test suites, automate the test-fix cycle, and maintain test quality over time. The primary examples use JUnit 5 and Spring Boot testing (matching the backend patterns above), with notes on React/frontend testing where relevant.
+
+### Why Test-First with AI Assistants
+
+Traditional test-driven development (TDD) is motivated by design feedback—writing tests first forces you to think about interfaces before implementations. With AI-assisted development, TDD has an additional and arguably more important benefit: **precision**. When you tell Claude Code "make these tests pass," you give it an unambiguous, machine-verifiable specification. Compare:
+
+- **Vague**: "Build a service that paginates orders by cursor"
+- **Precise**: "Build a service that passes these 8 tests, including edge cases for empty results, invalid cursors, and max page size capping"
+
+The vague prompt leaves room for Claude Code to make assumptions you'd disagree with. The precise prompt constrains its solution space to exactly the behavior you want.
+
+This also creates a **compound effect**: a well-tested codebase lets Claude Code make bolder changes with confidence. When you ask it to refactor the pagination logic or add a new filter parameter, existing tests immediately catch regressions. Without tests, each change requires manual verification—which doesn't scale.
+
+```text
+Before implementing OrderService.getHistory(), generate the test
+class first:
+
+1. Unit tests for OrderService (mock the repository):
+   - Returns empty list when no orders exist
+   - Returns paginated results with correct cursor
+   - Filters by status when status parameter provided
+   - Throws InvalidCursorException for malformed cursor
+   - Respects max page size limit (cap at 100)
+
+2. Use JUnit 5 @ParameterizedTest for the status filter variations
+3. Use Mockito for repository mocking
+4. Use AssertJ for fluent assertions
+
+After generating tests, run them—they should all FAIL (no
+implementation yet). Then implement the service to make them pass.
+```
+
+### Generating Comprehensive Test Suites
+
+Different layers of your application need different test strategies. The key insight for AI-assisted testing: give Claude Code the test *structure* and *conventions* explicitly, then let it generate the individual test cases. This produces comprehensive coverage without the tedium of writing each test manually.
+
+#### Unit Tests
+
+Unit tests verify individual classes in isolation. They're fast, focused, and the easiest for Claude Code to generate well—provided you specify the testing conventions.
+
+```text
+Generate unit tests for OrderService following these patterns:
+
+Framework: JUnit 5 with Mockito
+Location: src/test/java/.../service/OrderServiceTest.java
+
+Structure:
+- @Nested class per method (CreateOrder, GetHistory, UpdateStatus)
+- @ParameterizedTest with @EnumSource for status transitions
+- Mockito @Mock for OrderRepository, @InjectMocks for OrderService
+- AssertJ assertions (assertThat().isEqualTo(), not assertEquals())
+
+Cover:
+- Happy path for each method
+- All validation edge cases (null inputs, invalid ranges)
+- Error paths (entity not found, optimistic lock failure)
+- State machine transitions (which status changes are legal?)
+
+Run with: ./gradlew test --tests '*OrderServiceTest*'
+```
+
+Why this structure works well with Claude Code:
+- **`@Nested`** classes give Claude Code clear scope boundaries—it generates tests for one method at a time instead of producing a monolithic test class
+- **`@ParameterizedTest`** is declarative—Claude Code handles data-driven patterns well because the test logic is written once and the variations are just data
+- **AssertJ's fluent API** reads naturally in prompts and produces clear failure messages that help Claude Code diagnose issues in the test-fix loop
+
+#### Integration Tests
+
+Integration tests verify that multiple components work together against real infrastructure. This is where Testcontainers shines—it spins up real PostgreSQL containers for your tests, catching SQL-level bugs that in-memory databases like H2 would miss.
+
+```text
+Generate integration tests for the order management feature.
+
+Framework: @SpringBootTest + Testcontainers
+Location: src/test/java/.../OrderIntegrationTest.java
+
+Setup:
+- Use @Testcontainers with @Container PostgreSQLContainer
+- @DynamicPropertySource to point Spring to the Testcontainers DB
+- Flyway runs automatically on startup (no manual migration step)
+- Use @Transactional + @Rollback for test isolation
+
+Test scenarios:
+- Create order -> fetch by ID -> verify all fields persisted
+- Create 25 orders -> paginate with page size 10 -> verify 3 pages + cursors
+- Create order -> add items -> verify cascade persistence
+- Create order -> confirm -> verify status history recorded
+- Concurrent status updates -> verify optimistic lock prevents conflict
+
+Run with: ./gradlew test --tests '*OrderIntegrationTest*'
+```
+
+Why Testcontainers instead of H2: H2 silently ignores PostgreSQL-specific features like `@SQLRestriction`, partial indexes, and `CONCURRENTLY` index creation. Tests pass on H2 and fail in production—the worst possible outcome. Testcontainers runs real PostgreSQL, so what passes in tests passes in production.
+
+#### Spring Boot Test Slices
+
+Test slices load only the relevant Spring context, making them faster than `@SpringBootTest` while still testing real Spring behavior. They're ideal for focused, layer-specific testing.
+
+```text
+Generate test-slice tests for targeted layer testing:
+
+1. @WebMvcTest(OrderController.class)
+   - Test request parsing, validation, response serialization
+   - Mock the service layer with @MockBean
+   - Use MockMvc to send HTTP requests and assert responses
+   - Test: invalid JSON returns 400, missing auth returns 401,
+     valid request returns 200 with correct response shape
+
+2. @DataJpaTest
+   - Test custom repository queries against Testcontainers PostgreSQL
+   - Verify cursor pagination SQL is correct
+   - Test that @SQLRestriction filters soft-deleted records
+
+3. @JsonTest
+   - Test DTO serialization/deserialization
+   - Verify cursor encoding/decoding roundtrip
+   - Verify that internal fields (password_hash) are excluded from JSON
+
+Run with: ./gradlew test --tests '*Controller*Test*,*Repository*Test*'
+```
+
+Why test slices matter: `@WebMvcTest` loads only the web layer (no database, no service beans), so it starts in under 2 seconds. This makes the feedback loop fast—when Claude Code edits a controller and runs the slice test, it gets results immediately instead of waiting 15 seconds for a full `@SpringBootTest` startup.
+
+#### E2E and API Tests
+
+End-to-end tests verify the complete stack. For APIs, RestAssured provides a fluent DSL; for frontend, Playwright drives a real browser.
+
+```text
+Generate API E2E tests using RestAssured:
+
+Location: src/test/java/.../e2e/OrderApiE2ETest.java
+Setup: Full application running against Testcontainers
+       (use @SpringBootTest(webEnvironment = RANDOM_PORT))
+
+Test the complete API contract:
+- POST /api/v1/orders -> 201 with Location header
+- GET /api/v1/orders -> 200 with pagination headers
+- POST /api/v1/orders/{id}/confirm -> 200 with updated status
+- POST /api/v1/orders/{id}/confirm (already confirmed) -> 409 Conflict
+- GET /api/v1/orders (with auth as different tenant) -> empty list (isolation)
+
+These tests verify the entire stack: HTTP parsing, Spring Security,
+service logic, JPA persistence, and response serialization.
+```
+
+For **frontend E2E**, use Playwright with the same patterns described in the [Frontend Development](#frontend-development) section:
+
+```text
+Generate Playwright E2E tests for the order management UI:
+- Login -> navigate to orders -> verify table loads with data
+- Create new order -> verify it appears in the list
+- Filter by status -> verify only matching orders shown
+- Click order -> verify detail panel opens with correct data
+
+Use MSW (Mock Service Worker) for API mocking in component tests,
+and the real API (via Testcontainers) for full E2E tests.
+```
+
+### The Test-Fix Loop
+
+The test-fix loop is the operational heart of AI-assisted testing. The pattern is simple: run tests, feed failures to Claude Code, let it fix the implementation, and repeat until all tests pass. The key discipline is ensuring Claude Code fixes the **implementation**, not the tests.
+
+#### Manual Loop
+
+```text
+Run ./gradlew test and show me all failures. For each failure:
+1. Read the test to understand what it expects
+2. Read the implementation to find the bug
+3. Fix the implementation (not the test)
+4. Run that specific test to verify the fix
+5. Then run the full suite to check for regressions
+
+Do not move to the next failure until the current one passes.
+```
+
+Why "fix the implementation, not the test" matters: without this instruction, Claude Code may weaken a test to make it pass—changing an assertion from `assertThat(cursor).isNotEmpty()` to `assertThat(cursor).isNotNull()`, for example. This technically passes but doesn't verify the behavior you wanted. Making this rule explicit prevents the AI from taking the path of least resistance.
+
+#### Headless Automated Loop
+
+For CI/CD or batch operations, the test-fix loop can run entirely unattended:
+
+```bash
+claude -p \
+  "Run ./gradlew test. If any tests fail, analyze the failures, \
+   fix the implementation code (not the tests), and run again. \
+   Repeat until all tests pass or you've made 5 fix attempts. \
+   If a test still fails after 5 attempts, report it as unresolved." \
+  --max-turns 20 \
+  --max-budget-usd 3.00
+```
+
+Why these parameters:
+- **`--max-turns 20`**: Each test-run + analysis + fix cycle takes 3-4 turns. 20 turns allows approximately 5 full cycles—enough for most issues while preventing infinite loops.
+- **`--max-budget-usd 3.00`**: Safety net against runaway loops where Claude Code keeps attempting increasingly complex fixes. If the budget runs out, the failures are reported rather than silently consuming tokens.
+- **"5 fix attempts"**: An explicit exit condition in the prompt. If a test fails after 5 attempts, the root cause is likely architectural (not a simple bug), and human review is needed.
+
+#### Auto-Test Hook
+
+For the fastest possible feedback loop, configure a hook that runs the corresponding test class every time Claude Code edits a source file:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(jq -r '.tool_input.file_path'); echo $FILE | grep -q 'src/main/java' && CLASS=$(basename $FILE .java) && ./gradlew test --tests \"*${CLASS}Test*\" 2>&1 | tail -5 || true"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Why this hook helps: when Claude Code edits `OrderService.java`, this hook immediately runs `*OrderServiceTest*`. Claude Code sees the test results in its next turn without being asked, creating a tight feedback loop. The `tail -5` keeps the output concise—just the pass/fail summary, not the full stack trace—so Claude Code's context window isn't flooded with test output.
+
+### Test Quality and Maintenance
+
+Generating tests is only the first step. Maintaining test quality over time ensures the test suite remains a reliable safety net as your codebase evolves.
+
+#### Coverage Thresholds
+
+Coverage metrics prevent test decay—as Claude Code generates new code, coverage thresholds ensure tests are generated too.
+
+```text
+Configure JaCoCo code coverage in build.gradle.kts with these thresholds:
+- Line coverage: 80% overall
+- Branch coverage: 70% overall
+- Service layer: 90% line coverage (critical business logic)
+- Controller layer: 70% (input/output validation, not exhaustive)
+- Entity/DTO classes: exclude from coverage (data classes, not logic)
+
+Add the jacocoTestCoverageVerification task to the build pipeline
+so ./gradlew build fails if coverage drops below thresholds.
+
+After configuring, run ./gradlew jacocoTestReport and show me
+which classes are below the threshold so we can generate tests for them.
+```
+
+Why thresholds, not 100%: chasing 100% coverage leads to brittle tests that assert implementation details rather than behavior. 80% line coverage catches the meaningful gaps while leaving room for code that's genuinely not worth testing (trivial getters, framework glue).
+
+#### Mutation Testing
+
+Coverage tells you which lines are executed during tests. Mutation testing tells you which lines are actually *verified*. A surviving mutant—where the code is changed but no test fails—indicates a test that runs the code without checking the result.
+
+```text
+Configure PIT mutation testing in build.gradle.kts. Run against
+the service layer only (service/**).
+
+Target: 75% mutation kill rate.
+Show me surviving mutants—these indicate tests that pass but don't
+actually verify behavior. For each survivor, either strengthen
+the existing test assertion or add a new test case.
+```
+
+#### Flaky Test Detection
+
+Flaky tests are especially harmful in AI-assisted development: Claude Code may "fix" a flaky test by papering over the root cause, masking a real concurrency bug. When you encounter flakes, diagnose them explicitly:
+
+```text
+This test fails intermittently: OrderIntegrationTest.concurrentStatusUpdate.
+Analyze the test for race conditions, timing dependencies, or
+shared state. Propose a fix that makes it deterministic.
+
+Common causes:
+- Missing @Transactional isolation between tests
+- Shared test data across parallel test methods
+- Time-dependent assertions without tolerance
+- Testcontainers port allocation conflicts
+
+Record the root cause in the project memory file so future sessions
+are aware of this pattern.
+```
+
+With a robust testing strategy in place, the following sections apply these patterns to specific web application contexts—backend APIs, frontend SPAs, and full-stack coordination.
 
 ## Web Application Development
 
@@ -938,11 +1236,11 @@ Route map entry:
 
 Implementation order:
 1. Migration: products table with unique SKU constraint
-2. Model: Product struct with validation tags
-3. Repository: Create method with conflict detection
+2. Entity: Product JPA entity with Jakarta Validation annotations
+3. Repository: Spring Data JPA interface with conflict detection
 4. Service: CreateProduct with business validation (price > 0, valid category)
-5. Handler: Parse request, call service, render response
-6. Route: Register in router with admin middleware
+5. Controller: Parse request, call service, render response
+6. Route: @PostMapping with @PreAuthorize("hasRole('ADMIN')")
 7. Test: Unit test for service, integration test for full flow
 
 Use the existing User endpoint as the reference implementation.
@@ -1414,8 +1712,8 @@ jobs:
             Read
             Glob
             Grep
-            Bash(go test ./...)
-            Bash(golangci-lint run)
+            Bash(./gradlew test)
+            Bash(./gradlew checkstyleMain spotbugsMain)
 ```
 
 #### What This Enables
@@ -1713,7 +2011,7 @@ The following playbooks are end-to-end walkthroughs for common scenarios. Each c
 <details>
 <summary><h3>Playbook 1: Greenfield Microservice</h3></summary>
 
-**Scenario**: Create a new Go microservice from scratch with CI/CD and infrastructure.
+**Scenario**: Create a new Spring Boot microservice from scratch with CI/CD and infrastructure.
 
 **Time investment**: ~45 minutes of interactive sessions to produce a deployable service.
 
@@ -1726,26 +2024,31 @@ claude
 ```
 
 ```text
-Initialize a Go microservice project with the following structure:
+Initialize a Spring Boot microservice project with the following structure:
 
-cmd/server/main.go          - Entry point, config loading, server startup
-internal/config/config.go   - Environment-based configuration
-internal/handler/health.go  - Health check endpoint
-internal/handler/router.go  - Chi router setup with middleware
-internal/middleware/         - Auth, logging, recovery middleware
-internal/service/            - Business logic interfaces
-internal/repository/         - Data access interfaces
-internal/db/                 - sqlc generated code (placeholder)
-migrations/                  - goose migration directory
-api/openapi.yaml            - OpenAPI 3.1 spec (starter)
-Dockerfile                  - Multi-stage build
-Makefile                    - Build, test, lint, migrate targets
-.github/workflows/ci.yml   - GitHub Actions CI pipeline
-CLAUDE.md                   - Project conventions
+src/main/java/com/example/orderservice/
+  OrderServiceApplication.java     - Entry point (@SpringBootApplication)
+  config/AppProperties.java        - @ConfigurationProperties for app settings
+  controller/HealthController.java - Health check and readiness endpoints
+  controller/                      - REST controllers (@RestController)
+  service/                         - Business logic interfaces and implementations
+  repository/                      - Spring Data JPA repository interfaces
+  entity/                          - JPA entity classes
+  dto/                             - Request/response Java records
+  exception/                       - Domain exceptions + @ControllerAdvice handler
+src/main/resources/
+  application.yml                  - Spring Boot configuration
+  db/migration/                    - Flyway migration SQL files
+src/test/java/                     - Test mirror of main structure
+build.gradle.kts                   - Gradle build (Kotlin DSL)
+Dockerfile                         - Multi-stage build (Eclipse Temurin)
+docker-compose.yml                 - Local PostgreSQL
+.github/workflows/ci.yml          - GitHub Actions CI pipeline
+CLAUDE.md                          - Project conventions
 
-Use Go 1.22, Chi v5 router, slog for logging, sqlc for database
-queries, and goose for migrations. Include a docker-compose.yml
-for local PostgreSQL.
+Use Java 21, Spring Boot 3.3, Spring Web MVC, Spring Data JPA,
+Flyway for migrations, SLF4J/Logback for logging, and
+Testcontainers for integration tests.
 
 Generate all files with proper implementations, not just stubs.
 ```
@@ -1757,10 +2060,10 @@ After the initial scaffold, refine the CLAUDE.md:
 ```text
 Analyze the project you just created and generate a comprehensive
 CLAUDE.md that captures:
-- All build/test/lint commands
-- The architectural patterns used
-- Code conventions (error handling, naming, logging)
-- Database workflow (sqlc, goose)
+- All build/test/lint commands (Gradle tasks)
+- The architectural patterns used (Spring MVC, JPA, clean architecture)
+- Code conventions (exception handling, naming, logging)
+- Database workflow (Flyway migrations, JPA entities)
 - Directory structure and purpose of each package
 ```
 
@@ -1784,13 +2087,13 @@ Endpoints:
 - POST /api/v1/orders/{id}/cancel (transition to cancelled)
 
 Generate:
-1. Database migrations for the orders and order_items tables
-2. sqlc queries for all CRUD operations
+1. Flyway migrations for the orders and order_items tables
+2. Spring Data JPA entities and repository interfaces
 3. OpenAPI 3.1 spec for all endpoints
-4. Interface definitions for repository and service layers
+4. Java interface definitions for service layer
 
-Do NOT implement the handler/service/repository bodies yet.
-Only generate the metadata artifacts (migrations, queries, spec, interfaces).
+Do NOT implement the controller/service/repository bodies yet.
+Only generate the metadata artifacts (migrations, entities, spec, interfaces).
 ```
 
 #### Step 4: Implement Layer by Layer (20 min)
@@ -1798,14 +2101,13 @@ Only generate the metadata artifacts (migrations, queries, spec, interfaces).
 ```text
 Now implement the order service following the implementation order:
 
-1. Run `goose up` to apply migrations
-2. Run `sqlc generate` to create the database access layer
-3. Implement the repository layer using the generated sqlc code
-4. Implement the service layer with business logic (state machine for order status)
-5. Implement the handlers with proper request validation and error responses
-6. Register routes in the router
-7. Write table-driven unit tests for the service layer
-8. Write integration tests using testcontainers-go
+1. Start the app to run Flyway migrations (or ./gradlew flywayMigrate)
+2. Implement the repository layer using Spring Data JPA
+3. Implement the service layer with business logic (state machine for order status)
+4. Implement the controllers with request validation (@Valid) and error responses
+5. Configure Spring Security for endpoint authorization
+6. Write JUnit 5 unit tests for the service layer (Mockito for repository mocking)
+7. Write integration tests using @SpringBootTest + Testcontainers
 
 Implement each layer completely before moving to the next. Run
 tests after each layer.
@@ -1815,9 +2117,9 @@ tests after each layer.
 
 ```text
 Update .github/workflows/ci.yml to include:
-- Go build and test with race detector
-- golangci-lint
-- sqlc diff (verify generated code is up-to-date)
+- Java 21 setup with Gradle caching (actions/setup-java + gradle/actions/setup-gradle)
+- ./gradlew build (compiles, runs tests, runs checkstyle)
+- ./gradlew spotbugsMain
 - Docker image build
 - Push to ECR on main branch merge (use OIDC, not static credentials)
 
@@ -2014,14 +2316,16 @@ Produce a root cause analysis before suggesting any fix.
 #### Step 2: Fix with Verification
 
 ```text
-Based on the root cause analysis (the sqlc batch insert has a
-PostgreSQL parameter limit of 65535, and 50 items * 6 columns
-per item * multiple queries exceeds this):
+Based on the root cause analysis (the JPA service calls
+EntityManager.persist() in a loop without flushing, and 50 items
+with cascading inserts exceed the JDBC batch size, causing
+memory pressure and a transaction timeout):
 
-1. Fix the repository to batch inserts in groups of 100 items
-2. Wrap the batches in a transaction
-3. Add a unit test that inserts 200 items successfully
-4. Add a regression test specifically for the 50+ items case
+1. Fix the service to flush and clear the EntityManager every 100 items
+2. Configure spring.jpa.properties.hibernate.jdbc.batch_size=50
+3. Wrap the batches in a @Transactional method
+4. Add a unit test that inserts 200 items successfully
+5. Add a regression test specifically for the 50+ items case
 
 Run all tests after the fix.
 ```
@@ -2052,7 +2356,7 @@ Perform a security audit of this codebase. Check for:
 2. AUTH BYPASS: Endpoints missing authentication middleware
 3. SECRETS: Hardcoded credentials, API keys, or tokens
 4. INPUT VALIDATION: Endpoints accepting unvalidated user input
-5. DEPENDENCY VULNERABILITIES: Check go.sum / package-lock.json
+5. DEPENDENCY VULNERABILITIES: Check build.gradle.kts / package-lock.json
    for known CVEs
 6. SSRF: Any user-controlled URLs used in HTTP requests
 7. PATH TRAVERSAL: File operations with user-controlled paths
