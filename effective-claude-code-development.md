@@ -1185,7 +1185,7 @@ jobs:
        Update the human-readable API documentation in docs/api/ to
        match. Only update sections that correspond to changed endpoints." \
       --max-turns 8 \
-      --allowedTools "Read" "Glob" "Grep" "Edit" "Write"
+      --allowed-tools "Read" "Glob" "Grep" "Edit" "Write"
 ```
 
 ### Cost and Performance Management
@@ -1330,7 +1330,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "~> 1.7"  # Pin to your project's version
+          terraform_version: 1.7.5  # Pin to your project's version
 
       - name: Terraform Init
         run: terraform -chdir=terraform/environments/${{ matrix.environment }} init -backend=false
@@ -1342,9 +1342,10 @@ jobs:
         run: terraform fmt -check -recursive terraform/
 
       - name: Security scan
-        uses: aquasecurity/tfsec-action@v1
+        uses: aquasecurity/trivy-action@master
         with:
-          working_directory: terraform/
+          scan-type: config
+          scan-ref: terraform/
 
       - name: Claude Code Review
         uses: anthropics/claude-code-action@v1
@@ -1549,7 +1550,7 @@ Based on the CI/CD readiness report, generate:
 
 1. .github/workflows/ci.yml:
    - Trigger on PR and push to main
-   - Node.js matrix: [18, 20] (or whatever versions are appropriate)
+   - Node.js matrix: [20, 22] (or whatever versions are appropriate)
    - Steps: install, lint, typecheck, test, build
    - Cache node_modules using actions/cache
    - Upload test coverage as artifact
@@ -2386,6 +2387,8 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
 
 ### Desktop Notification on Completion
 
+**macOS:**
+
 ```json
 {
   "hooks": {
@@ -2395,6 +2398,25 @@ Hooks extend Claude Code's behavior with automated actions at specific lifecycle
           {
             "type": "command",
             "command": "osascript -e 'display notification \"Claude Code has finished\" with title \"Task Complete\"'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Linux (requires `notify-send`):**
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "notify-send 'Task Complete' 'Claude Code has finished'"
           }
         ]
       }
@@ -2439,8 +2461,7 @@ When implementation requires extensive codebase exploration, delegate the resear
 
 Commit `CLAUDE.md`, `.claude/settings.json`, and `.claude/agents/` to your repository. These are team assets that improve everyone's experience with Claude Code.
 
-> [!CAUTION]
-> ### Anti-Patterns
+### Anti-Patterns
 
 #### 1. The "Build Me Everything" Prompt
 
@@ -2687,3 +2708,9 @@ Validate with terraform plan.
 - `rds-postgres` - Database instances
 - `elasticache-redis` - Cache clusters
 ```
+
+---
+
+## Conclusion
+
+The gap between AI-assisted code generation and production-quality software is bridged by context. The metadata-first methodology described here—investing in `CLAUDE.md`, architecture decision records, interface contracts, and implementation checklists before writing code—transforms Claude Code from a generic autocomplete tool into an informed collaborator that understands your project's conventions, constraints, and patterns. Start with a well-crafted `CLAUDE.md`, use plan mode for your next feature, and measure the difference.
